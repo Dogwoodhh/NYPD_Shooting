@@ -1,0 +1,204 @@
+---
+title: "NYPD_Shooting"
+author: "Lei Yao"
+date: '2022-04-24'
+output: pdf_document
+---
+## 1. Data Set and Inspired Question
+
+NYPD Shooting Incident Data (Historic) is available from the NYPD website, which is extracted and reviewed by the Office of Management Analysis and Planning. Another access to the data is going to the Data.gov website (https://catalog.data.gov/dataset) and searching for it.
+
+The data records every shooting incident that occurred in NYC from January 1, 2006, to December 31, 2020, as well as information about the event, the location and time of occurrence, and information related to suspect and victim demographics.
+
+I am interested in exploring the relationship between the number of shooting cases and other factors, like occurrence date, borough, victim age group, victim sex, and victim race.
+
+## 2. Import Data
+
+```{r setup, include=TRUE}
+library(tidyverse)
+library(lubridate)
+library(dplyr) 
+```
+
+Let's begin with importing the data and see what we have.
+
+```{r import_data, echo=TRUE}
+url<- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+NYPD_Shooting_raw <- read_csv(url)
+head(NYPD_Shooting_raw)
+```
+I would like to tidy the raw data. The variables I am interested in are OCCUR_DATE, BORO, VIC_AGE_GROUP, VIC_SEX, and VIC_RACE, so I will group the data set by these variables and add a new variable to count the number of cases for each line. Then change the OCCUR_DATE variable into the year-month-date format, which is more R-friendly in the future analysis.
+
+
+```{r tidy_data, echo=TRUE}
+NYPD_Shooting <- NYPD_Shooting_raw %>% 
+  mutate(date = mdy(OCCUR_DATE)) %>%
+  mutate(cases = 1) %>% 
+  group_by(date, BORO, VIC_AGE_GROUP, VIC_SEX, VIC_RACE) %>% 
+  summarize(cases = sum(cases)) %>% 
+  ungroup()
+head(NYPD_Shooting)
+summary(NYPD_Shooting)
+```
+## 3. Visualization 
+
+I will put the occurrence date on the x-axis and the number of shooting cases on the y-axis and plot it, let's see what it looks like.
+
+```{r visualize_data, echo=TRUE}
+NYPD_Shooting %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_point() +
+  labs(title = "NYPD Shooting", y = NULL)
+```
+
+The plot is messy and there is no obvious trend, so I will change the x-axis from occurrence date to occurrence month. Here is the new visualization:
+
+```{r}
+NYPD_Shooting_month <- NYPD_Shooting %>%
+  mutate(month = format(date, "%Y-%m")) %>%
+  group_by(month) %>%
+  summarize(cases = sum(cases)) %>%
+  ungroup()
+
+NYPD_Shooting_month %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = month, y = cases)) +
+  geom_point() +
+  labs(title = "NYPD Shooting Month", y = NULL)
+```
+
+It seems that the number of shooting cases gradually decreases except at the very end part of the plot. To see it more clearly, I am going on changing the x-axis, from occurrence month to occurrence year.
+
+```{r}
+NYPD_Shooting_year <- NYPD_Shooting %>%
+  mutate(year = format(date, "%Y")) %>%
+  group_by(year) %>%
+  summarize(cases = sum(cases)) %>%
+  ungroup()
+
+NYPD_Shooting_year %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = year, y = cases)) +
+  geom_point() +
+  labs(title = "NYPD Shooting Year", y = NULL)
+```
+
+It seems that by year is a good option since the trend is more obvious now. Let's explore the relationship between occurrence year and the number of shooting cases, by a linear model.
+
+## 4. Modeling
+
+```{r}
+typeof(NYPD_Shooting_year$year) # type of year in NYPD_Shooting_year is character
+
+NYPD_Shooting_year <- NYPD_Shooting_year %>% 
+  mutate(year = as.numeric(year)) # change character into double
+
+model <- lm(cases ~ year, data = NYPD_Shooting_year)
+summary(model)
+
+NYPD_Shooting_year_w_pred <- NYPD_Shooting_year %>% 
+  mutate(pred = predict(model))
+
+NYPD_Shooting_year_w_pred %>% ggplot() +
+  geom_point(aes(x = year, y = cases), color = "blue") +
+  geom_point(aes(x = year, y = pred), color = "red")
+```
+
+We can see the model predicts well at some level, but there are still points off the modeling line. So we may consider other factors as part of the prediction.
+
+## 5. Visualization Continue - More Factors
+
+I will create a new data set based on the occurrence year because it looks nicer than the month and date. And then visualize the number of shooting cases versus occurrence year and other factors: borough, victim age group, victim sex, and victim race.
+
+
+```{r}
+NYPD_Shooting_new <- NYPD_Shooting %>%
+  mutate(year = format(date, "%Y")) %>%
+  select(-date) %>%
+  select(year, everything())
+```
+
+### For borough:
+
+```{r}
+NYPD_Shooting_by_boro <- NYPD_Shooting_new %>%
+  group_by(year, BORO) %>%
+  summarize(cases = sum(cases)) %>%
+  ungroup()
+
+NYPD_Shooting_by_boro %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = year, y = cases)) +
+  geom_point(aes(color = factor(BORO))) +
+  labs(title = "NYPD Shooting by Borough", y = NULL)
+```
+
+Brooklyn has the most shooting cases, followed by Bronx, Queens, Manhattan, and Staten Island.
+
+### For victim age group:
+
+```{r}
+NYPD_Shooting_by_vic_age_group <- NYPD_Shooting_new %>%
+  group_by(year, VIC_AGE_GROUP) %>%
+  summarize(cases = sum(cases)) %>%
+  ungroup()
+
+NYPD_Shooting_by_vic_age_group %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = year, y = cases)) +
+  geom_point(aes(color = factor(VIC_AGE_GROUP))) +
+  labs(title = "NYPD Shooting by Victim Age Group", y = NULL)
+```
+
+Shooting cases occur most in the 25-44 age group, followed by 18-24, <18, 45-64, 65+, and unknown age group.
+
+### For victim sex:
+
+```{r}
+NYPD_Shooting_by_vic_sex <- NYPD_Shooting_new %>%
+  group_by(year, VIC_SEX) %>%
+  summarize(cases = sum(cases)) %>%
+  ungroup()
+
+NYPD_Shooting_by_vic_sex %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = year, y = cases)) +
+  geom_point(aes(color = factor(VIC_SEX))) +
+  labs(title = "NYPD Shooting by Victim Sex", y = NULL)
+```
+
+The number of male victims is larger than that of female victims, and that of unknown sex is the least.
+
+### For victim race:
+
+```{r}
+NYPD_Shooting_by_vic_race <- NYPD_Shooting_new %>%
+  group_by(year, VIC_RACE) %>%
+  summarize(cases = sum(cases)) %>%
+  ungroup()
+
+NYPD_Shooting_by_vic_race %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = year, y = cases)) +
+  geom_point(aes(color = factor(VIC_RACE))) +
+  labs(title = "NYPD Shooting by Victim Race", y = NULL)
+```
+
+The number of Black victims is the most, followed by White Hispanics, Black Hispanics, etc.
+
+## 6. Conclusion and Future Work
+
+In general, the number of shooting cases decreases over time, except for the latest year. Although the number of shooting cases and occurrence year linear model does a reasonably good job of predicting, there are still some points off the modeling line. It is clear that there is some relationship between the factors visualized above and the number of shooting cases, so in the future, I'd better investigate more by considering all of the above factors as well as occurrence year, and remodel.
+
+## 7. Possible Sources of Bias
+
+According to the NYPD Shooting by Victim Age Group plot, Brooklyn has the most shooting cases, followed by Bronx, Queens, Manhattan, and Staten Island. But it does not necessarily mean Brooklyn is the most dangerous borough in New York City, maybe it is just because there is a much more population in Brooklyn. After considering the population, the rank might change.
+
+## 8. Session Info
+
+```{r}
+sessionInfo()
+```
+
+
